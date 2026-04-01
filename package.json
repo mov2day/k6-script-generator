@@ -1,0 +1,17 @@
+{
+  "name": "k6-script-generator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CLI + static web generator for modular k6 scripts.",
+  "scripts": {
+    "cli": "node src/cli/index.js",
+    "serve:docs": "python3 -m http.server 8080 --directory docs",
+    "sync:web-core": "node scripts/sync-web-core.mjs",
+    "build:web": "npm run sync:web-core",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

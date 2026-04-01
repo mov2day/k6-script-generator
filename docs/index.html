@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>k6 Script Generator</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="ambient-bg"></div>
+    <header class="hero">
+      <p class="eyebrow">k6 Script Generator</p>
+      <h1>Build a script in under 2 minutes</h1>
+      <p class="hero-copy">
+        Fill the quick form, choose static or auto-dynamic data, and generate modular k6 files.
+      </p>
+    </header>
+
+    <main class="layout">
+      <section class="panel reveal">
+        <h2>1. Endpoint</h2>
+        <div class="grid two-col">
+          <label>
+            Test name
+            <input id="test-name" type="text" value="generated-k6-test" />
+          </label>
+          <label>
+            Base URL
+            <input id="base-url" type="url" value="https://example.com" />
+          </label>
+          <label>
+            Path
+            <input id="path" type="text" value="/api/v1/resource" />
+          </label>
+          <label>
+            Method
+            <select id="method">
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+              <option value="PUT">PUT</option>
+              <option value="PATCH">PATCH</option>
+              <option value="DELETE">DELETE</option>
+              <option value="HEAD">HEAD</option>
+              <option value="OPTIONS">OPTIONS</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="panel reveal">
+        <h2>2. Authentication</h2>
+        <div class="grid two-col">
+          <label>
+            Auth type
+            <select id="auth-type">
+              <option value="none">No auth</option>
+              <option value="basic">Basic (username/password)</option>
+              <option value="api_key">API key</option>
+              <option value="token">Custom token header</option>
+              <option value="bearer">Bearer token</option>
+              <option value="oauth_existing">OAuth (existing token)</option>
+              <option value="oauth_client_credentials">OAuth (client credentials)</option>
+              <option value="oauth_password">OAuth (password grant)</option>
+            </select>
+          </label>
+        </div>
+        <div id="auth-fields" class="grid two-col"></div>
+      </section>
+
+      <section class="panel reveal">
+        <h2>3. Request Data</h2>
+        <div class="grid three-col">
+          <label>
+            Payload type
+            <select id="payload-type">
+              <option value="none">none</option>
+              <option value="json">json</option>
+              <option value="text">text</option>
+            </select>
+          </label>
+          <label>
+            Dynamic data
+            <select id="dynamic-mode">
+              <option value="static">Keep values static</option>
+              <option value="auto">Auto-generate dynamic values</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="payload-json-mode-wrap" class="grid two-col hidden">
+          <label>
+            JSON input mode
+            <select id="payload-json-mode">
+              <option value="fields">Field builder</option>
+              <option value="raw">Paste raw JSON</option>
+            </select>
+          </label>
+          <p class="helper-text inline-note" id="payload-json-mode-help">
+            Use the field builder for simple payloads, or paste raw JSON for nested objects and arrays.
+          </p>
+        </div>
+
+        <div class="grid two-col editors-grid">
+          <section class="editor-card">
+            <div class="editor-head">
+              <h3>Headers</h3>
+              <button id="add-header" class="btn secondary mini" type="button">Add header</button>
+            </div>
+            <p class="editor-empty">Add only custom headers here. Auth headers are added from the auth section.</p>
+            <div id="header-rows" class="kv-list"></div>
+          </section>
+          <section class="editor-card">
+            <div class="editor-head">
+              <h3>Query params</h3>
+              <button id="add-query-param" class="btn secondary mini" type="button">Add param</button>
+            </div>
+            <p class="editor-empty">Use query params for `?name=value` style inputs.</p>
+            <div id="query-rows" class="kv-list"></div>
+          </section>
+        </div>
+
+        <section id="payload-json-wrap" class="editor-card">
+          <div id="payload-json-builder" class="payload-mode">
+            <div class="editor-head">
+              <h3>JSON payload fields</h3>
+              <button id="add-payload-field" class="btn secondary mini" type="button">Add field</button>
+            </div>
+            <p class="editor-empty">Fast builder for flat JSON payloads.</p>
+            <div id="payload-rows" class="payload-list"></div>
+          </div>
+
+          <div id="payload-json-raw" class="payload-mode hidden">
+            <h3>JSON payload fields</h3>
+            <p class="editor-empty">Paste raw JSON when you need nested objects or arrays.</p>
+            <textarea id="payload-json-raw-text" rows="8" placeholder='{"user":{"id":1},"items":[{"sku":"A1"}]}'></textarea>
+          </div>
+        </section>
+
+        <label id="payload-text-wrap" class="hidden">
+          Payload text
+          <textarea id="payload-text" rows="6" placeholder="Paste raw text payload"></textarea>
+        </label>
+      </section>
+
+      <section class="panel reveal">
+        <h2>4. Checks + Thresholds</h2>
+        <div class="grid two-col">
+          <label>
+            Expected status code
+            <input id="status-code" type="number" value="200" />
+          </label>
+        </div>
+
+        <div class="check-list">
+          <label class="check-row">
+            <span><input id="enable-body-contains" type="checkbox" /> Response should contain text</span>
+            <input id="body-contains-value" type="text" placeholder="success" disabled />
+          </label>
+
+          <label class="check-row">
+            <span><input id="enable-p95" type="checkbox" checked /> p95 response time (ms)</span>
+            <input id="p95-ms" type="number" value="800" min="1" />
+          </label>
+
+          <label class="check-row">
+            <span><input id="enable-p99" type="checkbox" checked /> p99 response time (ms)</span>
+            <input id="p99-ms" type="number" value="1500" min="1" />
+          </label>
+
+          <label class="check-row">
+            <span><input id="enable-error-rate" type="checkbox" checked /> Error rate threshold (%)</span>
+            <input id="error-rate-percent" type="number" value="1" min="0" max="100" step="0.1" />
+          </label>
+        </div>
+      </section>
+
+      <section class="panel reveal">
+        <h2>5. Load Profile</h2>
+        <div class="grid two-col">
+          <label>
+            Preset
+            <select id="load-preset">
+              <option value="quick">Quick</option>
+              <option value="smoke">Smoke</option>
+              <option value="load">Load</option>
+              <option value="stress">Stress</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+        </div>
+
+        <section class="editor-card">
+          <div class="editor-head">
+            <h3 id="load-profile-title">Smoke</h3>
+          </div>
+          <p id="load-profile-description" class="helper-text">
+            Low steady traffic to validate the endpoint works under light concurrent usage.
+          </p>
+          <p id="load-profile-summary" class="editor-empty"></p>
+        </section>
+
+        <div id="custom-load-fields" class="grid three-col hidden">
+          <label>
+            Target type
+            <select id="target-type">
+              <option value="vus">VUs</option>
+              <option value="rpm">RPM</option>
+            </select>
+          </label>
+          <label>
+            Target value
+            <input id="target-value" type="number" value="10" min="1" />
+          </label>
+          <label>
+            Duration seconds
+            <input id="custom-duration" type="number" value="300" min="30" />
+          </label>
+          <label>
+            Ramp-up seconds
+            <input id="custom-ramp" type="number" value="60" min="10" />
+          </label>
+        </div>
+        <p id="custom-load-help" class="helper-text hidden">
+          Custom profile will ramp up to your target and hold it for the remaining duration.
+        </p>
+      </section>
+
+      <section class="panel reveal">
+        <div class="section-head">
+          <h2>6. Generate</h2>
+          <button id="generate" class="btn primary" type="button">Generate k6 files</button>
+        </div>
+        <p class="helper-text" id="status-message">Ready.</p>
+      </section>
+
+      <section class="panel reveal">
+        <h2>Output</h2>
+        <div id="output-files" class="output-grid">
+          <p class="muted">Generated files will appear here.</p>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

@@ -30,12 +30,39 @@ const LOAD_PROFILE_HELP = {
   }
 };
 
+const AUTH_LABELS = {
+  none: "No auth",
+  basic: "Basic auth",
+  api_key: "API key",
+  token: "Custom token",
+  bearer: "Bearer token",
+  oauth_existing: "OAuth token",
+  oauth_client_credentials: "OAuth client credentials",
+  oauth_password: "OAuth password grant"
+};
+
 function byId(id) {
   const element = document.getElementById(id);
   if (!element) {
     throw new Error(`Missing element #${id}`);
   }
   return element;
+}
+
+function joinUrl(baseUrl, path) {
+  const base = String(baseUrl || "").trim();
+  const normalizedPath = String(path || "").trim() || "/";
+
+  if (!base) {
+    return normalizedPath;
+  }
+  if (base.endsWith("/") && normalizedPath.startsWith("/")) {
+    return `${base.slice(0, -1)}${normalizedPath}`;
+  }
+  if (!base.endsWith("/") && !normalizedPath.startsWith("/")) {
+    return `${base}/${normalizedPath}`;
+  }
+  return `${base}${normalizedPath}`;
 }
 
 function setStatus(message, type = "muted") {
@@ -110,6 +137,29 @@ function renderAuthFields() {
 
 function togglePairedInput(checkboxId, inputId) {
   byId(inputId).disabled = !byId(checkboxId).checked;
+}
+
+function updateLiveSummary() {
+  const name = byId("test-name").value.trim() || "generated-k6-test";
+  const method = byId("method").value || "GET";
+  const baseUrl = byId("base-url").value.trim() || "https://example.com";
+  const path = byId("path").value.trim() || "/";
+  const authType = byId("auth-type").value || "none";
+  const dynamicMode = byId("dynamic-mode").value || "static";
+  const loadPreset = byId("load-preset").value || "quick";
+
+  byId("summary-name").textContent = name;
+  byId("summary-request").textContent = `${method} ${path}`;
+  byId("summary-auth").textContent = AUTH_LABELS[authType] || authType;
+  byId("summary-dynamic").textContent =
+    dynamicMode === "auto" ? "Auto dynamic" : "Static values";
+  byId("summary-load").textContent =
+    loadPreset === "custom"
+      ? buildCustomLoadSummary()
+      : (LOAD_PROFILE_HELP[loadPreset] || LOAD_PROFILE_HELP.quick).title;
+
+  byId("preview-method").textContent = method;
+  byId("preview-url").textContent = joinUrl(baseUrl, path);
 }
 
 function updatePayloadVisibility() {
@@ -584,6 +634,52 @@ function wireRowEditors() {
   });
 }
 
+function wireProgressNav() {
+  const links = [...document.querySelectorAll(".progress-link")];
+  const sections = links
+    .map((link) => {
+      const href = link.getAttribute("href") || "";
+      return href.startsWith("#") ? document.querySelector(href) : null;
+    })
+    .filter(Boolean);
+
+  if (!links.length || !sections.length) {
+    return;
+  }
+
+  const setActive = (sectionId) => {
+    for (const link of links) {
+      link.classList.toggle("is-active", link.getAttribute("href") === `#${sectionId}`);
+    }
+  };
+
+  const syncActiveSection = () => {
+    let current = sections[0].id;
+    const probe = window.innerHeight * 0.28;
+
+    for (const section of sections) {
+      if (section.getBoundingClientRect().top - probe <= 0) {
+        current = section.id;
+      }
+    }
+
+    setActive(current);
+  };
+
+  for (const link of links) {
+    link.addEventListener("click", () => {
+      const href = link.getAttribute("href") || "";
+      if (href.startsWith("#")) {
+        setActive(href.slice(1));
+      }
+    });
+  }
+
+  window.addEventListener("scroll", syncActiveSection, { passive: true });
+  window.addEventListener("resize", syncActiveSection);
+  syncActiveSection();
+}
+
 function wireEvents() {
   byId("auth-type").addEventListener("change", renderAuthFields);
   byId("payload-type").addEventListener("change", updatePayloadVisibility);
@@ -609,6 +705,10 @@ function wireEvents() {
 
   byId("generate").addEventListener("click", generateFiles);
   wireRowEditors();
+  wireProgressNav();
+
+  document.addEventListener("input", updateLiveSummary);
+  document.addEventListener("change", updateLiveSummary);
 }
 
 function bootstrap() {
@@ -623,6 +723,7 @@ function bootstrap() {
     togglePairedInput("enable-p99", "p99-ms");
     togglePairedInput("enable-error-rate", "error-rate-percent");
 
+    updateLiveSummary();
     wireEvents();
   } catch (error) {
     console.error(error);

@@ -3,6 +3,7 @@ import { normalizeInteger } from "./utils.js";
 
 function normalizeAuth(auth = {}) {
   const type = auth.type || "none";
+
   if (type === "basic") {
     return {
       type,
@@ -69,7 +70,7 @@ function normalizeAuth(auth = {}) {
 
 function normalizePayload(payloadType, payload) {
   if (payloadType === "json") {
-    if (payload && typeof payload === "object") {
+    if (payload !== null && typeof payload === "object") {
       return payload;
     }
     return {};
@@ -90,13 +91,13 @@ function groupDynamicRules(rules = []) {
   };
 
   for (const rule of rules) {
-    if (!rule || !grouped[rule.area]) {
+    if (!rule || !grouped[rule.area] || rule.mode === "static") {
       continue;
     }
 
     grouped[rule.area].push({
+      area: rule.area,
       path: rule.path || "$",
-      mode: rule.mode || "dynamic",
       strategy: rule.strategy || "random_string",
       options: rule.options || {}
     });
@@ -106,9 +107,8 @@ function groupDynamicRules(rules = []) {
 }
 
 function normalizeAssertions(assertions = {}) {
-  const statusCode = normalizeInteger(assertions.statusCode, 200);
   return {
-    statusCode,
+    statusCode: normalizeInteger(assertions.statusCode, 200),
     bodyContains: Array.isArray(assertions.bodyContains)
       ? assertions.bodyContains.filter((item) => String(item || "").trim())
       : [],
@@ -158,14 +158,261 @@ function generateConfigFile(config) {
   ].join("\n");
 }
 
-function generateAuthFile() {
+function hasDynamicRules(config) {
+  return Object.values(config.dynamicRules || {}).some((rules) => Array.isArray(rules) && rules.length > 0);
+}
+
+function needsOAuthHelper(config) {
+  return config.auth.type === "oauth_client_credentials" || config.auth.type === "oauth_password";
+}
+
+function needsEncodingImport(config) {
+  return config.auth.type === "basic";
+}
+
+function tokenizePath(path) {
+  if (!path || path === "$") {
+    return [];
+  }
+
+  const tokens = [];
+  const matcher = /([^.[\]]+)|\[(\d+)\]/g;
+  let match;
+
+  while ((match = matcher.exec(path)) !== null) {
+    if (match[1] !== undefined) {
+      tokens.push(match[1]);
+    } else {
+      tokens.push(Number(match[2]));
+    }
+  }
+
+  return tokens;
+}
+
+function buildPathExpression(rootExpression, path) {
+  const tokens = tokenizePath(path);
+  if (!tokens.length) {
+    return rootExpression;
+  }
+
+  return tokens.reduce((expression, token) => {
+    if (typeof token === "number") {
+      return `${expression}[${token}]`;
+    }
+    return `${expression}[${JSON.stringify(token)}]`;
+  }, rootExpression);
+}
+
+function collectUsedStrategies(config) {
+  const strategies = new Set();
+
+  Object.values(config.dynamicRules || {}).forEach((rules) => {
+    (rules || []).forEach((rule) => {
+      strategies.add(rule.strategy);
+    });
+  });
+
+  return strategies;
+}
+
+function generateDynamicExpression(rule) {
+  const options = rule.options || {};
+
+  if (rule.strategy === "uuid") {
+    return "uuidv4()";
+  }
+  if (rule.strategy === "iso_datetime") {
+    return "new Date().toISOString()";
+  }
+  if (rule.strategy === "epoch_seconds") {
+    return "Math.floor(Date.now() / 1000)";
+  }
+  if (rule.strategy === "epoch_millis") {
+    return "Date.now()";
+  }
+  if (rule.strategy === "random_string") {
+    return `randomString(${Math.max(4, Number(options.length || 10))})`;
+  }
+  if (rule.strategy === "random_digits") {
+    return `randomDigits(${Math.max(1, Number(options.length || 6))})`;
+  }
+  if (rule.strategy === "integer_digits") {
+    return `Number(randomDigits(${Math.max(1, Number(options.digits || 6))}))`;
+  }
+  if (rule.strategy === "integer_range") {
+    return `randomInt(${Number(options.min || 0)}, ${Number(options.max || 100)})`;
+  }
+  if (rule.strategy === "float_range") {
+    return `randomFloat(${Number(options.min || 0)}, ${Number(options.max || 1)})`;
+  }
+  if (rule.strategy === "boolean_flip") {
+    return "Math.random() >= 0.5";
+  }
+  if (rule.strategy === "email") {
+    return `randomEmail(${JSON.stringify(options.domain || "example.test")})`;
+  }
+  if (rule.strategy === "lorem_text") {
+    return `randomText(${Math.max(10, Number(options.minLength || 40))})`;
+  }
+  if (rule.strategy === "pattern") {
+    return `patternValue(${JSON.stringify(options.segments || [])})`;
+  }
+
+  return "undefined";
+}
+
+function generateDynamicHelperFile(config) {
+  const strategies = collectUsedStrategies(config);
+  const lines = [];
+
+  lines.push("function clone(value) {");
+  lines.push("  if (value === null || typeof value !== \"object\") {");
+  lines.push("    return value;");
+  lines.push("  }");
+  lines.push("  return JSON.parse(JSON.stringify(value));");
+  lines.push("}");
+  lines.push("");
+
+  if (
+    strategies.has("random_string") ||
+    strategies.has("random_digits") ||
+    strategies.has("integer_digits") ||
+    strategies.has("uuid") ||
+    strategies.has("email") ||
+    strategies.has("lorem_text") ||
+    strategies.has("pattern")
+  ) {
+    lines.push("function randomFromCharset(length, charset) {");
+    lines.push("  var output = \"\";");
+    lines.push("  for (var i = 0; i < length; i += 1) {");
+    lines.push("    var index = Math.floor(Math.random() * charset.length);");
+    lines.push("    output += charset.charAt(index);");
+    lines.push("  }");
+    lines.push("  return output;");
+    lines.push("}");
+    lines.push("");
+  }
+
+  if (strategies.has("random_string")) {
+    lines.push("function randomString(length) {");
+    lines.push("  return randomFromCharset(length, \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\");");
+    lines.push("}");
+    lines.push("");
+  }
+
+  if (strategies.has("random_digits") || strategies.has("integer_digits") || strategies.has("email") || strategies.has("pattern")) {
+    lines.push("function randomDigits(length) {");
+    lines.push("  return randomFromCharset(length, \"0123456789\");");
+    lines.push("}");
+    lines.push("");
+  }
+
+  if (strategies.has("integer_range")) {
+    lines.push("function randomInt(min, max) {");
+    lines.push("  var low = Math.min(min, max);");
+    lines.push("  var high = Math.max(min, max);");
+    lines.push("  return Math.floor(Math.random() * (high - low + 1)) + low;");
+    lines.push("}");
+    lines.push("");
+  }
+
+  if (strategies.has("float_range")) {
+    lines.push("function randomFloat(min, max) {");
+    lines.push("  var low = Math.min(min, max);");
+    lines.push("  var high = Math.max(min, max);");
+    lines.push("  return Number((Math.random() * (high - low) + low).toFixed(3));");
+    lines.push("}");
+    lines.push("");
+  }
+
+  if (strategies.has("uuid")) {
+    lines.push("function uuidv4() {");
+    lines.push("  return \"xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx\".replace(/[xy]/g, function (char) {");
+    lines.push("    var random = Math.floor(Math.random() * 16);");
+    lines.push("    var value = char === \"x\" ? random : (random & 0x3) | 0x8;");
+    lines.push("    return value.toString(16);");
+    lines.push("  });");
+    lines.push("}");
+    lines.push("");
+  }
+
+  if (strategies.has("email")) {
+    lines.push("function randomEmail(domain) {");
+    lines.push("  return \"user_\" + randomDigits(6) + \"@\" + domain;");
+    lines.push("}");
+    lines.push("");
+  }
+
+  if (strategies.has("lorem_text")) {
+    lines.push("function randomText(minLength) {");
+    lines.push("  var text = \"\";");
+    lines.push("  while (text.length < minLength) {");
+    lines.push("    text += randomFromCharset(6, \"abcdefghijklmnopqrstuvwxyz\") + \" \";");
+    lines.push("  }");
+    lines.push("  return text.trim();");
+    lines.push("}");
+    lines.push("");
+  }
+
+  if (strategies.has("pattern")) {
+    lines.push("function patternValue(segments) {");
+    lines.push("  var output = \"\";");
+    lines.push("  for (var i = 0; i < segments.length; i += 1) {");
+    lines.push("    var segment = segments[i];");
+    lines.push("    var count = Math.max(1, Number(segment.count || 1));");
+    lines.push("    if (segment.type === \"upper\") {");
+    lines.push("      output += randomFromCharset(count, \"ABCDEFGHIJKLMNOPQRSTUVWXYZ\");");
+    lines.push("    } else if (segment.type === \"lower\") {");
+    lines.push("      output += randomFromCharset(count, \"abcdefghijklmnopqrstuvwxyz\");");
+    lines.push("    } else if (segment.type === \"digit\") {");
+    lines.push("      output += randomDigits(count);");
+    lines.push("    } else {");
+    lines.push("      output += String(segment.value || \"X\").repeat(count);");
+    lines.push("    }");
+    lines.push("  }");
+    lines.push("  return output;");
+    lines.push("}");
+    lines.push("");
+  }
+
+  lines.push("export function applyDynamicData(request) {");
+  lines.push("  var requestData = {");
+  lines.push("    headers: clone(request.headers || {}),");
+  lines.push("    queryParams: clone(request.queryParams || {}),");
+  lines.push("    payload: clone(request.payload)");
+  lines.push("  };");
+  lines.push("");
+
+  for (const [area, rules] of Object.entries(config.dynamicRules || {})) {
+    const rootExpression =
+      area === "headers"
+        ? "requestData.headers"
+        : area === "queryParams"
+          ? "requestData.queryParams"
+          : "requestData.payload";
+
+    for (const rule of rules) {
+      const targetExpression = buildPathExpression(rootExpression, rule.path);
+      lines.push(`  ${targetExpression} = ${generateDynamicExpression(rule)};`);
+    }
+  }
+
+  lines.push("");
+  lines.push("  return requestData;");
+  lines.push("}");
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+function generateOAuthHelperFile() {
   return [
     "import http from \"k6/http\";",
-    "import encoding from \"k6/encoding\";",
     "import { fail } from \"k6\";",
     "",
-    "function formEncode(payload) {",
-    "  return Object.entries(payload)",
+    "function formEncode(data) {",
+    "  return Object.entries(data)",
     "    .filter(function (entry) {",
     "      return entry[1] !== undefined && entry[1] !== null && entry[1] !== \"\";",
     "    })",
@@ -175,29 +422,26 @@ function generateAuthFile() {
     "    .join(\"&\");",
     "}",
     "",
-    "function fetchOAuthToken(auth) {",
+    "export function getAccessToken(auth) {",
     "  if (!auth.tokenUrl) {",
     "    fail(\"OAuth tokenUrl is required\");",
     "  }",
     "",
-    "  var payload = {};",
-    "  if (auth.type === \"oauth_client_credentials\") {",
-    "    payload = {",
-    "      grant_type: \"client_credentials\",",
-    "      client_id: auth.clientId,",
-    "      client_secret: auth.clientSecret,",
-    "      scope: auth.scope || undefined",
-    "    };",
-    "  } else {",
-    "    payload = {",
-    "      grant_type: \"password\",",
-    "      client_id: auth.clientId,",
-    "      client_secret: auth.clientSecret,",
-    "      username: auth.username || undefined,",
-    "      password: auth.password || undefined,",
-    "      scope: auth.scope || undefined",
-    "    };",
-    "  }",
+    "  var payload = auth.type === \"oauth_client_credentials\"",
+    "    ? {",
+    "        grant_type: \"client_credentials\",",
+    "        client_id: auth.clientId,",
+    "        client_secret: auth.clientSecret,",
+    "        scope: auth.scope || undefined",
+    "      }",
+    "    : {",
+    "        grant_type: \"password\",",
+    "        client_id: auth.clientId,",
+    "        client_secret: auth.clientSecret,",
+    "        username: auth.username || undefined,",
+    "        password: auth.password || undefined,",
+    "        scope: auth.scope || undefined",
+    "      };",
     "",
     "  var response = http.post(auth.tokenUrl, formEncode(payload), {",
     "    headers: { \"Content-Type\": \"application/x-www-form-urlencoded\" }",
@@ -221,356 +465,163 @@ function generateAuthFile() {
     "",
     "  return token;",
     "}",
-    "",
-    "export function initializeAuth(config) {",
-    "  var auth = config.auth || { type: \"none\" };",
-    "  if (auth.type === \"oauth_client_credentials\" || auth.type === \"oauth_password\") {",
-    "    return { bearerToken: fetchOAuthToken(auth) };",
-    "  }",
-    "  if (auth.type === \"oauth_existing\") {",
-    "    return { bearerToken: auth.existingToken || \"\" };",
-    "  }",
-    "  return {};",
-    "}",
-    "",
-    "export function applyAuth(requestParts, config, authState) {",
-    "  var auth = config.auth || { type: \"none\" };",
-    "  var headers = Object.assign({}, requestParts.headers || {});",
-    "  var queryParams = Object.assign({}, requestParts.queryParams || {});",
-    "",
-    "  if (auth.type === \"basic\") {",
-    "    var basicToken = encoding.b64encode((auth.username || \"\") + \":\" + (auth.password || \"\"));",
-    "    headers.Authorization = \"Basic \" + basicToken;",
-    "  }",
-    "",
-    "  if (auth.type === \"bearer\") {",
-    "    headers.Authorization = \"Bearer \" + (auth.token || \"\");",
-    "  }",
-    "",
-    "  if (auth.type === \"token\") {",
-    "    headers[auth.headerName || \"X-Auth-Token\"] = auth.token || \"\";",
-    "  }",
-    "",
-    "  if (auth.type === \"api_key\") {",
-    "    if (auth.location === \"query\") {",
-    "      queryParams[auth.keyName || \"api_key\"] = auth.value || \"\";",
-    "    } else {",
-    "      headers[auth.keyName || \"x-api-key\"] = auth.value || \"\";",
-    "    }",
-    "  }",
-    "",
-    "  if (auth.type === \"oauth_existing\" || auth.type === \"oauth_client_credentials\" || auth.type === \"oauth_password\") {",
-    "    var token = (authState && authState.bearerToken) || auth.existingToken || \"\";",
-    "    if (token) {",
-    "      headers.Authorization = \"Bearer \" + token;",
-    "    }",
-    "  }",
-    "",
-    "  return { headers: headers, queryParams: queryParams };",
-    "}",
     ""
   ].join("\n");
 }
 
-function generateDataHelperFile() {
-  return [
-    "function deepClone(value) {",
-    "  if (value === null || typeof value !== \"object\") {",
-    "    return value;",
-    "  }",
-    "  return JSON.parse(JSON.stringify(value));",
-    "}",
-    "",
-    "function parsePath(path) {",
-    "  if (!path || path === \"$\") {",
-    "    return [];",
-    "  }",
-    "  var tokens = [];",
-    "  var matcher = /([^.[\\]]+)|\\[(\\d+)\\]/g;",
-    "  var match;",
-    "  while ((match = matcher.exec(path)) !== null) {",
-    "    if (match[1] !== undefined) {",
-    "      tokens.push(match[1]);",
-    "    } else {",
-    "      tokens.push(Number(match[2]));",
-    "    }",
-    "  }",
-    "  return tokens;",
-    "}",
-    "",
-    "function getByPath(obj, path) {",
-    "  var tokens = parsePath(path);",
-    "  var current = obj;",
-    "  for (var i = 0; i < tokens.length; i += 1) {",
-    "    if (current === null || current === undefined) {",
-    "      return undefined;",
-    "    }",
-    "    current = current[tokens[i]];",
-    "  }",
-    "  return current;",
-    "}",
-    "",
-    "function setByPath(obj, path, value) {",
-    "  var tokens = parsePath(path);",
-    "  if (tokens.length === 0) {",
-    "    return value;",
-    "  }",
-    "",
-    "  var current = obj;",
-    "  for (var i = 0; i < tokens.length - 1; i += 1) {",
-    "    var token = tokens[i];",
-    "    var nextToken = tokens[i + 1];",
-    "    if (current[token] === undefined || current[token] === null) {",
-    "      current[token] = typeof nextToken === \"number\" ? [] : {};",
-    "    }",
-    "    current = current[token];",
-    "  }",
-    "",
-    "  current[tokens[tokens.length - 1]] = value;",
-    "  return obj;",
-    "}",
-    "",
-    "function randomInt(min, max) {",
-    "  var floorMin = Math.ceil(min);",
-    "  var floorMax = Math.floor(max);",
-    "  return Math.floor(Math.random() * (floorMax - floorMin + 1)) + floorMin;",
-    "}",
-    "",
-    "function randomFromCharset(length, charset) {",
-    "  var out = \"\";",
-    "  for (var i = 0; i < length; i += 1) {",
-    "    out += charset.charAt(randomInt(0, charset.length - 1));",
-    "  }",
-    "  return out;",
-    "}",
-    "",
-    "function randomDigits(length) {",
-    "  return randomFromCharset(length, \"0123456789\");",
-    "}",
-    "",
-    "function randomAlphaNumeric(length) {",
-    "  return randomFromCharset(length, \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\");",
-    "}",
-    "",
-    "function uuidv4() {",
-    "  return \"xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx\".replace(/[xy]/g, function (char) {",
-    "    var random = Math.floor(Math.random() * 16);",
-    "    var value = char === \"x\" ? random : (random & 0x3) | 0x8;",
-    "    return value.toString(16);",
-    "  });",
-    "}",
-    "",
-    "function fromSegments(segments) {",
-    "  var output = \"\";",
-    "  for (var i = 0; i < segments.length; i += 1) {",
-    "    var segment = segments[i];",
-    "    var count = Math.max(1, Number(segment.count || 1));",
-    "    if (segment.type === \"upper\") {",
-    "      output += randomFromCharset(count, \"ABCDEFGHIJKLMNOPQRSTUVWXYZ\");",
-    "    } else if (segment.type === \"lower\") {",
-    "      output += randomFromCharset(count, \"abcdefghijklmnopqrstuvwxyz\");",
-    "    } else if (segment.type === \"digit\") {",
-    "      output += randomDigits(count);",
-    "    } else {",
-    "      var literal = String(segment.value || \"X\");",
-    "      output += literal.repeat(count);",
-    "    }",
-    "  }",
-    "  return output;",
-    "}",
-    "",
-    "function generateValue(currentValue, rule) {",
-    "  var options = rule.options || {};",
-    "  if (rule.strategy === \"uuid\") {",
-    "    return uuidv4();",
-    "  }",
-    "  if (rule.strategy === \"iso_datetime\") {",
-    "    return new Date().toISOString();",
-    "  }",
-    "  if (rule.strategy === \"epoch_seconds\") {",
-    "    return Math.floor(Date.now() / 1000);",
-    "  }",
-    "  if (rule.strategy === \"epoch_millis\") {",
-    "    return Date.now();",
-    "  }",
-    "  if (rule.strategy === \"random_string\") {",
-    "    var stringLength = Math.max(4, Number(options.length || (typeof currentValue === \"string\" ? currentValue.length : 10)));",
-    "    return randomAlphaNumeric(stringLength);",
-    "  }",
-    "  if (rule.strategy === \"random_digits\") {",
-    "    var digitsLength = Math.max(1, Number(options.length || 6));",
-    "    return randomDigits(digitsLength);",
-    "  }",
-    "  if (rule.strategy === \"integer_digits\") {",
-    "    var fixedDigits = Math.max(1, Number(options.digits || 6));",
-    "    return Number(randomDigits(fixedDigits));",
-    "  }",
-    "  if (rule.strategy === \"integer_range\") {",
-    "    var minInt = Number(options.min || 0);",
-    "    var maxInt = Number(options.max || minInt + 100);",
-    "    return randomInt(Math.min(minInt, maxInt), Math.max(minInt, maxInt));",
-    "  }",
-    "  if (rule.strategy === \"float_range\") {",
-    "    var minFloat = Number(options.min || 0);",
-    "    var maxFloat = Number(options.max || minFloat + 1);",
-    "    var raw = Math.random() * (Math.max(minFloat, maxFloat) - Math.min(minFloat, maxFloat)) + Math.min(minFloat, maxFloat);",
-    "    return Number(raw.toFixed(3));",
-    "  }",
-    "  if (rule.strategy === \"boolean_flip\") {",
-    "    return Math.random() >= 0.5;",
-    "  }",
-    "  if (rule.strategy === \"email\") {",
-    "    return \"user_\" + randomDigits(6) + \"@\" + String(options.domain || \"example.test\");",
-    "  }",
-    "  if (rule.strategy === \"lorem_text\") {",
-    "    var minLength = Math.max(10, Number(options.minLength || 40));",
-    "    var text = \"\";",
-    "    while (text.length < minLength) {",
-    "      text += randomFromCharset(6, \"abcdefghijklmnopqrstuvwxyz\") + \" \";",
-    "    }",
-    "    return text.trim();",
-    "  }",
-    "  if (rule.strategy === \"pattern\" && Array.isArray(options.segments) && options.segments.length) {",
-    "    return fromSegments(options.segments);",
-    "  }",
-    "",
-    "  return currentValue;",
-    "}",
-    "",
-    "export function applyDynamicRules(template, rules) {",
-    "  var result = deepClone(template);",
-    "  if (!Array.isArray(rules) || rules.length === 0) {",
-    "    return result;",
-    "  }",
-    "",
-    "  for (var i = 0; i < rules.length; i += 1) {",
-    "    var rule = rules[i];",
-    "    if (!rule || rule.mode === \"static\") {",
-    "      continue;",
-    "    }",
-    "",
-    "    if (!rule.path || rule.path === \"$\") {",
-    "      result = generateValue(result, rule);",
-    "      continue;",
-    "    }",
-    "",
-    "    var currentValue = getByPath(result, rule.path);",
-    "    var generatedValue = generateValue(currentValue, rule);",
-    "    setByPath(result, rule.path, generatedValue);",
-    "  }",
-    "",
-    "  return result;",
-    "}",
-    ""
-  ].join("\n");
+function generateScriptFile(config) {
+  const dynamic = hasDynamicRules(config);
+  const oauthHelper = needsOAuthHelper(config);
+  const encodingImport = needsEncodingImport(config);
+  const authType = config.auth.type;
+  const lines = [];
+
+  lines.push("import http from \"k6/http\";");
+  lines.push("import { check } from \"k6\";");
+  if (encodingImport) {
+    lines.push("import encoding from \"k6/encoding\";");
+  }
+  if (oauthHelper) {
+    lines.push("import { getAccessToken } from \"./auth.js\";");
+  }
+  if (dynamic) {
+    lines.push("import { applyDynamicData } from \"./data-helper.js\";");
+  }
+  lines.push("import { config } from \"./config.js\";");
+  lines.push("");
+  lines.push("export const options = config.options;");
+  lines.push("");
+  lines.push("function buildUrl(baseUrl, path, queryParams) {");
+  lines.push("  var base = String(baseUrl || \"\").replace(/\\/+$/, \"\");");
+  lines.push("  var normalizedPath = String(path || \"/\");");
+  lines.push("  var finalPath = normalizedPath.charAt(0) === \"/\" ? normalizedPath : \"/\" + normalizedPath;");
+  lines.push("  var parts = [];");
+  lines.push("");
+  lines.push("  Object.entries(queryParams || {}).forEach(function (entry) {");
+  lines.push("    var key = entry[0];");
+  lines.push("    var value = entry[1];");
+  lines.push("    if (value === undefined || value === null || value === \"\") {");
+  lines.push("      return;");
+  lines.push("    }");
+  lines.push("    parts.push(encodeURIComponent(key) + \"=\" + encodeURIComponent(String(value)));");
+  lines.push("  });");
+  lines.push("");
+  lines.push("  return parts.length ? base + finalPath + \"?\" + parts.join(\"&\") : base + finalPath;");
+  lines.push("}");
+  lines.push("");
+  if (authType !== "none") {
+    lines.push(`function applyAuth(headers, queryParams${oauthHelper ? ", authState" : ""}) {`);
+    if (authType === "basic") {
+      lines.push("  headers.Authorization = \"Basic \" + encoding.b64encode((config.auth.username || \"\") + \":\" + (config.auth.password || \"\"));");
+    } else if (authType === "bearer") {
+      lines.push("  headers.Authorization = \"Bearer \" + (config.auth.token || \"\");");
+    } else if (authType === "token") {
+      lines.push("  headers[config.auth.headerName || \"X-Auth-Token\"] = config.auth.token || \"\";");
+    } else if (authType === "api_key") {
+      lines.push("  if (config.auth.location === \"query\") {");
+      lines.push("    queryParams[config.auth.keyName || \"api_key\"] = config.auth.value || \"\";");
+      lines.push("  } else {");
+      lines.push("    headers[config.auth.keyName || \"x-api-key\"] = config.auth.value || \"\";");
+      lines.push("  }");
+    } else if (authType === "oauth_existing") {
+      lines.push("  headers.Authorization = \"Bearer \" + (config.auth.existingToken || \"\");");
+    } else if (oauthHelper) {
+      lines.push("  headers.Authorization = \"Bearer \" + ((authState && authState.accessToken) || \"\");");
+    }
+    lines.push("");
+    lines.push("  return { headers: headers, queryParams: queryParams };");
+    lines.push("}");
+    lines.push("");
+  }
+  lines.push("function buildChecks(assertions) {");
+  lines.push("  var checks = {};");
+  lines.push("  checks[\"status is \" + assertions.statusCode] = function (response) {");
+  lines.push("    return response.status === assertions.statusCode;");
+  lines.push("  };");
+  lines.push("");
+  lines.push("  (assertions.bodyContains || []).forEach(function (expected) {");
+  lines.push("    checks['body contains \"' + expected + '\"'] = function (response) {");
+  lines.push("      return typeof response.body === \"string\" && response.body.indexOf(expected) !== -1;");
+  lines.push("    };");
+  lines.push("  });");
+  lines.push("");
+  lines.push("  (assertions.bodyRegex || []).forEach(function (pattern) {");
+  lines.push("    var regex = null;");
+  lines.push("    try {");
+  lines.push("      regex = new RegExp(pattern);");
+  lines.push("    } catch (error) {");
+  lines.push("      regex = null;");
+  lines.push("    }");
+  lines.push("    if (!regex) {");
+  lines.push("      return;");
+  lines.push("    }");
+  lines.push("    checks[\"body matches /\" + pattern + \"/\"] = function (response) {");
+  lines.push("      return typeof response.body === \"string\" && regex.test(response.body);");
+  lines.push("    };");
+  lines.push("  });");
+  lines.push("");
+  lines.push("  return checks;");
+  lines.push("}");
+  lines.push("");
+
+  if (oauthHelper) {
+    lines.push("export function setup() {");
+    lines.push("  return { accessToken: getAccessToken(config.auth) };");
+    lines.push("}");
+    lines.push("");
+  }
+
+  lines.push(`export default function (${oauthHelper ? "setupData" : ""}) {`);
+  if (dynamic) {
+    lines.push("  var requestData = applyDynamicData(config.request);");
+  } else {
+    lines.push("  var requestData = {");
+    lines.push("    headers: Object.assign({}, config.request.headers || {}),");
+    lines.push("    queryParams: Object.assign({}, config.request.queryParams || {}),");
+    lines.push("    payload: config.request.payload");
+    lines.push("  };");
+  }
+  lines.push("");
+  if (authType !== "none") {
+    lines.push("  var authApplied = applyAuth(");
+    lines.push("    Object.assign({}, requestData.headers || {}),");
+    lines.push(`    Object.assign({}, requestData.queryParams || {})${oauthHelper ? "," : ""}`);
+    if (oauthHelper) {
+      lines.push("    setupData");
+    }
+    lines.push("  );");
+  } else {
+    lines.push("  var authApplied = {");
+    lines.push("    headers: Object.assign({}, requestData.headers || {}),");
+    lines.push("    queryParams: Object.assign({}, requestData.queryParams || {})");
+    lines.push("  };");
+  }
+  lines.push("");
+  lines.push("  var body = null;");
+  lines.push("  if (config.request.payloadType === \"json\") {");
+  lines.push("    authApplied.headers[\"Content-Type\"] = authApplied.headers[\"Content-Type\"] || \"application/json\";");
+  lines.push("    body = JSON.stringify(requestData.payload || {});");
+  lines.push("  } else if (config.request.payloadType === \"text\") {");
+  lines.push("    body = typeof requestData.payload === \"string\" ? requestData.payload : String(requestData.payload || \"\");");
+  lines.push("  }");
+  lines.push("");
+  lines.push("  var url = buildUrl(config.baseUrl, config.request.path, authApplied.queryParams);");
+  lines.push("  var response = http.request(config.request.method, url, body, { headers: authApplied.headers });");
+  lines.push("  check(response, buildChecks(config.assertions));");
+  lines.push("}");
+  lines.push("");
+
+  return lines.join("\n");
 }
 
-function generateScriptFile() {
-  return [
-    "import http from \"k6/http\";",
-    "import { check } from \"k6\";",
-    "import { config } from \"./config.js\";",
-    "import { applyDynamicRules } from \"./data-helper.js\";",
-    "import { initializeAuth, applyAuth } from \"./auth.js\";",
-    "",
-    "export const options = config.options;",
-    "",
-    "function buildUrl(baseUrl, path, queryParams) {",
-    "  var cleanBase = String(baseUrl || \"\").replace(/\\/+$/, \"\");",
-    "  var safePath = String(path || \"/\");",
-    "  var cleanPath = safePath.charAt(0) === \"/\" ? safePath : \"/\" + safePath;",
-    "",
-    "  var parts = [];",
-    "  Object.entries(queryParams || {}).forEach(function (entry) {",
-    "    var key = entry[0];",
-    "    var value = entry[1];",
-    "    if (value === undefined || value === null || value === \"\") {",
-    "      return;",
-    "    }",
-    "    parts.push(encodeURIComponent(key) + \"=\" + encodeURIComponent(String(value)));",
-    "  });",
-    "",
-    "  if (parts.length === 0) {",
-    "    return cleanBase + cleanPath;",
-    "  }",
-    "",
-    "  return cleanBase + cleanPath + \"?\" + parts.join(\"&\");",
-    "}",
-    "",
-    "function buildChecks(assertions) {",
-    "  var checks = {};",
-    "  var statusCode = Number(assertions.statusCode || 200);",
-    "  checks[\"status is \" + statusCode] = function (response) {",
-    "    return response.status === statusCode;",
-    "  };",
-    "",
-    "  (assertions.bodyContains || []).forEach(function (expected) {",
-    "    checks['body contains \"' + expected + '\"'] = function (response) {",
-    "      return typeof response.body === \"string\" && response.body.indexOf(expected) !== -1;",
-    "    };",
-    "  });",
-    "",
-    "  (assertions.bodyRegex || []).forEach(function (rawPattern) {",
-    "    var regex = null;",
-    "    try {",
-    "      regex = new RegExp(rawPattern);",
-    "    } catch (error) {",
-    "      regex = null;",
-    "    }",
-    "    if (!regex) {",
-    "      return;",
-    "    }",
-    "    checks[\"body matches /\" + rawPattern + \"/\"] = function (response) {",
-    "      return typeof response.body === \"string\" && regex.test(response.body);",
-    "    };",
-    "  });",
-    "",
-    "  return checks;",
-    "}",
-    "",
-    "export function setup() {",
-    "  var authState = initializeAuth(config);",
-    "  return { authState: authState };",
-    "}",
-    "",
-    "export default function (setupData) {",
-    "  var headers = applyDynamicRules(config.request.headers, config.dynamicRules.headers);",
-    "  var queryParams = applyDynamicRules(config.request.queryParams, config.dynamicRules.queryParams);",
-    "  var payload = applyDynamicRules(config.request.payload, config.dynamicRules.payload);",
-    "",
-    "  var authState = (setupData && setupData.authState) || {};",
-    "  var authApplied = applyAuth({ headers: headers, queryParams: queryParams }, config, authState);",
-    "  var url = buildUrl(config.baseUrl, config.request.path, authApplied.queryParams);",
-    "",
-    "  var body = null;",
-    "  if (config.request.payloadType === \"json\") {",
-    "    body = JSON.stringify(payload || {});",
-    "    if (!authApplied.headers[\"Content-Type\"]) {",
-    "      authApplied.headers[\"Content-Type\"] = \"application/json\";",
-    "    }",
-    "  } else if (config.request.payloadType === \"text\") {",
-    "    body = typeof payload === \"string\" ? payload : String(payload || \"\");",
-    "  }",
-    "",
-    "  var response = http.request(config.request.method, url, body, {",
-    "    headers: authApplied.headers",
-    "  });",
-    "",
-    "  check(response, buildChecks(config.assertions));",
-    "}",
-    ""
-  ].join("\n");
-}
+function generateOutputReadme(config, files) {
+  const fileNames = Object.keys(files);
 
-function generateOutputReadme(config) {
   return [
     `# Generated k6 Script: ${config.meta.name}`,
     "",
     "## Files",
-    "- `script.js`: Main k6 test entrypoint.",
-    "- `config.js`: Endpoint, auth, assertions, dynamic rules, scenarios, thresholds.",
-    "- `auth.js`: Auth helpers (basic, API key, bearer, OAuth).",
-    "- `data-helper.js`: Dynamic value generators and payload mutators.",
+    ...fileNames.map((fileName) => `- \`${fileName}\``),
     "",
     "## Run",
     "```bash",
@@ -582,12 +633,19 @@ function generateOutputReadme(config) {
 
 export function generateProjectFiles(spec) {
   const config = normalizeSpec(spec);
-
-  return {
+  const files = {
     "config.js": generateConfigFile(config),
-    "auth.js": generateAuthFile(),
-    "data-helper.js": generateDataHelperFile(),
-    "script.js": generateScriptFile(),
-    "README.md": generateOutputReadme(config)
+    "script.js": generateScriptFile(config)
   };
+
+  if (needsOAuthHelper(config)) {
+    files["auth.js"] = generateOAuthHelperFile();
+  }
+
+  if (hasDynamicRules(config)) {
+    files["data-helper.js"] = generateDynamicHelperFile(config);
+  }
+
+  files["README.md"] = generateOutputReadme(config, files);
+  return files;
 }

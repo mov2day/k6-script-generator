@@ -54,11 +54,54 @@ const files = generateProjectFiles({
   }
 });
 
-const requiredFiles = ["config.js", "auth.js", "data-helper.js", "script.js", "README.md"];
+const requiredFiles = ["config.js", "data-helper.js", "script.js", "README.md"];
 for (const fileName of requiredFiles) {
   if (!files[fileName]) {
     throw new Error(`Missing generated file: ${fileName}`);
   }
+}
+
+if (files["auth.js"]) {
+  throw new Error("Did not expect auth.js for bearer-token auth.");
+}
+
+const oauthFiles = generateProjectFiles({
+  meta: {
+    name: "oauth-smoke-test"
+  },
+  baseUrl: "https://example.com",
+  request: {
+    path: "/oauth-check",
+    method: "GET",
+    headers: {},
+    queryParams: {},
+    payloadType: "none",
+    payload: null
+  },
+  auth: {
+    type: "oauth_client_credentials",
+    tokenUrl: "https://example.com/oauth/token",
+    clientId: "client-id",
+    clientSecret: "client-secret"
+  },
+  assertions: {
+    statusCode: 200
+  },
+  dynamicRules: [],
+  loadProfile: {
+    preset: "quick"
+  },
+  thresholds: {
+    useDefault: true
+  }
+});
+
+if (!oauthFiles["auth.js"]) {
+  throw new Error("Expected auth.js for OAuth token generation.");
+}
+
+if (oauthFiles["data-helper.js"]) {
+  throw new Error("Did not expect data-helper.js when no dynamic rules exist.");
 }
 
 console.log("Smoke check passed.");

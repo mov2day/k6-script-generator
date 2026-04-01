@@ -8,237 +8,378 @@
   </head>
   <body>
     <div class="ambient-bg"></div>
+    <div class="mesh-grid"></div>
+
     <header class="hero">
-      <p class="eyebrow">k6 Script Generator</p>
-      <h1>Build a script in under 2 minutes</h1>
-      <p class="hero-copy">
-        Fill the quick form, choose static or auto-dynamic data, and generate modular k6 files.
-      </p>
+      <div class="hero-copy-block">
+        <p class="eyebrow">k6 Script Generator</p>
+        <h1>Design one clean load test without the usual scaffolding noise.</h1>
+        <p class="hero-copy">
+          This first version builds a single-endpoint k6 test with modular auth,
+          practical thresholds, and a load profile you can explain to another
+          engineer.
+        </p>
+        <div class="hero-meta">
+          <span class="meta-pill">Single endpoint</span>
+          <span class="meta-pill">CLI + static web</span>
+          <span class="meta-pill">GitHub Pages ready</span>
+        </div>
+      </div>
+
+      <section class="hero-brief" aria-label="Current scope">
+        <p class="brief-label">Current scope</p>
+        <ul class="brief-list">
+          <li>One request per generated test</li>
+          <li>Conditional helper files only when needed</li>
+          <li>Fast setup intended to finish in under two minutes</li>
+        </ul>
+      </section>
     </header>
 
-    <main class="layout">
-      <section class="panel reveal">
-        <h2>1. Endpoint</h2>
-        <div class="grid two-col">
-          <label>
-            Test name
-            <input id="test-name" type="text" value="generated-k6-test" />
-          </label>
-          <label>
-            Base URL
-            <input id="base-url" type="url" value="https://example.com" />
-          </label>
-          <label>
-            Path
-            <input id="path" type="text" value="/api/v1/resource" />
-          </label>
-          <label>
-            Method
-            <select id="method">
-              <option value="GET">GET</option>
-              <option value="POST">POST</option>
-              <option value="PUT">PUT</option>
-              <option value="PATCH">PATCH</option>
-              <option value="DELETE">DELETE</option>
-              <option value="HEAD">HEAD</option>
-              <option value="OPTIONS">OPTIONS</option>
-            </select>
-          </label>
-        </div>
-      </section>
-
-      <section class="panel reveal">
-        <h2>2. Authentication</h2>
-        <div class="grid two-col">
-          <label>
-            Auth type
-            <select id="auth-type">
-              <option value="none">No auth</option>
-              <option value="basic">Basic (username/password)</option>
-              <option value="api_key">API key</option>
-              <option value="token">Custom token header</option>
-              <option value="bearer">Bearer token</option>
-              <option value="oauth_existing">OAuth (existing token)</option>
-              <option value="oauth_client_credentials">OAuth (client credentials)</option>
-              <option value="oauth_password">OAuth (password grant)</option>
-            </select>
-          </label>
-        </div>
-        <div id="auth-fields" class="grid two-col"></div>
-      </section>
-
-      <section class="panel reveal">
-        <h2>3. Request Data</h2>
-        <div class="grid three-col">
-          <label>
-            Payload type
-            <select id="payload-type">
-              <option value="none">none</option>
-              <option value="json">json</option>
-              <option value="text">text</option>
-            </select>
-          </label>
-          <label>
-            Dynamic data
-            <select id="dynamic-mode">
-              <option value="static">Keep values static</option>
-              <option value="auto">Auto-generate dynamic values</option>
-            </select>
-          </label>
-        </div>
-
-        <div id="payload-json-mode-wrap" class="grid two-col hidden">
-          <label>
-            JSON input mode
-            <select id="payload-json-mode">
-              <option value="fields">Field builder</option>
-              <option value="raw">Paste raw JSON</option>
-            </select>
-          </label>
-          <p class="helper-text inline-note" id="payload-json-mode-help">
-            Use the field builder for simple payloads, or paste raw JSON for nested objects and arrays.
-          </p>
-        </div>
-
-        <div class="grid two-col editors-grid">
-          <section class="editor-card">
-            <div class="editor-head">
-              <h3>Headers</h3>
-              <button id="add-header" class="btn secondary mini" type="button">Add header</button>
-            </div>
-            <p class="editor-empty">Add only custom headers here. Auth headers are added from the auth section.</p>
-            <div id="header-rows" class="kv-list"></div>
+    <main class="workspace">
+      <aside class="workspace-rail">
+        <div class="rail-stack">
+          <section class="rail-card">
+            <p class="rail-label">Flow</p>
+            <nav id="step-nav" class="progress-nav" aria-label="Form steps">
+              <a class="progress-link is-active" href="#step-endpoint"><span>1</span> Endpoint</a>
+              <a class="progress-link" href="#step-auth"><span>2</span> Authentication</a>
+              <a class="progress-link" href="#step-request"><span>3</span> Request Data</a>
+              <a class="progress-link" href="#step-checks"><span>4</span> Checks</a>
+              <a class="progress-link" href="#step-load"><span>5</span> Load Profile</a>
+              <a class="progress-link" href="#step-output"><span>6</span> Output</a>
+            </nav>
           </section>
-          <section class="editor-card">
-            <div class="editor-head">
-              <h3>Query params</h3>
-              <button id="add-query-param" class="btn secondary mini" type="button">Add param</button>
-            </div>
-            <p class="editor-empty">Use query params for `?name=value` style inputs.</p>
-            <div id="query-rows" class="kv-list"></div>
+
+          <section class="rail-card">
+            <p class="rail-label">Current plan</p>
+            <dl class="summary-list">
+              <div>
+                <dt>Test</dt>
+                <dd id="summary-name">generated-k6-test</dd>
+              </div>
+              <div>
+                <dt>Request</dt>
+                <dd id="summary-request">GET /api/v1/resource</dd>
+              </div>
+              <div>
+                <dt>Auth</dt>
+                <dd id="summary-auth">No auth</dd>
+              </div>
+              <div>
+                <dt>Data mode</dt>
+                <dd id="summary-dynamic">Static values</dd>
+              </div>
+              <div>
+                <dt>Load</dt>
+                <dd id="summary-load">Quick</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="rail-card action-card">
+            <p class="rail-label">Generate</p>
+            <p class="helper-text">
+              Produce a small, reviewable k6 starter from the form on the right.
+            </p>
+            <button id="generate" class="btn primary wide" type="button">Generate k6 files</button>
+            <p class="helper-text" id="status-message" role="status" aria-live="polite">Ready.</p>
           </section>
         </div>
+      </aside>
 
-        <section id="payload-json-wrap" class="editor-card">
-          <div id="payload-json-builder" class="payload-mode">
-            <div class="editor-head">
-              <h3>JSON payload fields</h3>
-              <button id="add-payload-field" class="btn secondary mini" type="button">Add field</button>
+      <div class="workspace-main">
+        <section id="step-endpoint" class="panel reveal">
+          <div class="panel-intro">
+            <div class="section-title-block">
+              <p class="section-kicker">Step 1</p>
+              <h2>Endpoint</h2>
             </div>
-            <p class="editor-empty">Fast builder for flat JSON payloads.</p>
-            <div id="payload-rows" class="payload-list"></div>
+            <p class="section-note">
+              Define one request clearly. Keep the first script narrow and extend
+              later.
+            </p>
           </div>
 
-          <div id="payload-json-raw" class="payload-mode hidden">
-            <h3>JSON payload fields</h3>
-            <p class="editor-empty">Paste raw JSON when you need nested objects or arrays.</p>
-            <textarea id="payload-json-raw-text" rows="8" placeholder='{"user":{"id":1},"items":[{"sku":"A1"}]}'></textarea>
+          <div class="grid two-col form-grid">
+            <label>
+              Test name
+              <input id="test-name" type="text" value="generated-k6-test" />
+            </label>
+            <label>
+              Base URL
+              <input id="base-url" type="url" value="https://example.com" />
+            </label>
+            <label>
+              Path
+              <input id="path" type="text" value="/api/v1/resource" />
+            </label>
+            <label>
+              Method
+              <select id="method">
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="PATCH">PATCH</option>
+                <option value="DELETE">DELETE</option>
+                <option value="HEAD">HEAD</option>
+                <option value="OPTIONS">OPTIONS</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="section-strip">
+            <p class="strip-label">Resolved target</p>
+            <p class="strip-value">
+              <span id="preview-method">GET</span>
+              <code id="preview-url">https://example.com/api/v1/resource</code>
+            </p>
           </div>
         </section>
 
-        <label id="payload-text-wrap" class="hidden">
-          Payload text
-          <textarea id="payload-text" rows="6" placeholder="Paste raw text payload"></textarea>
-        </label>
-      </section>
-
-      <section class="panel reveal">
-        <h2>4. Checks + Thresholds</h2>
-        <div class="grid two-col">
-          <label>
-            Expected status code
-            <input id="status-code" type="number" value="200" />
-          </label>
-        </div>
-
-        <div class="check-list">
-          <label class="check-row">
-            <span><input id="enable-body-contains" type="checkbox" /> Response should contain text</span>
-            <input id="body-contains-value" type="text" placeholder="success" disabled />
-          </label>
-
-          <label class="check-row">
-            <span><input id="enable-p95" type="checkbox" checked /> p95 response time (ms)</span>
-            <input id="p95-ms" type="number" value="800" min="1" />
-          </label>
-
-          <label class="check-row">
-            <span><input id="enable-p99" type="checkbox" checked /> p99 response time (ms)</span>
-            <input id="p99-ms" type="number" value="1500" min="1" />
-          </label>
-
-          <label class="check-row">
-            <span><input id="enable-error-rate" type="checkbox" checked /> Error rate threshold (%)</span>
-            <input id="error-rate-percent" type="number" value="1" min="0" max="100" step="0.1" />
-          </label>
-        </div>
-      </section>
-
-      <section class="panel reveal">
-        <h2>5. Load Profile</h2>
-        <div class="grid two-col">
-          <label>
-            Preset
-            <select id="load-preset">
-              <option value="quick">Quick</option>
-              <option value="smoke">Smoke</option>
-              <option value="load">Load</option>
-              <option value="stress">Stress</option>
-              <option value="custom">Custom</option>
-            </select>
-          </label>
-        </div>
-
-        <section class="editor-card">
-          <div class="editor-head">
-            <h3 id="load-profile-title">Smoke</h3>
+        <section id="step-auth" class="panel reveal">
+          <div class="panel-intro">
+            <div class="section-title-block">
+              <p class="section-kicker">Step 2</p>
+              <h2>Authentication</h2>
+            </div>
+            <p class="section-note">
+              Pick one auth strategy. The form only shows the fields needed for
+              that choice.
+            </p>
           </div>
-          <p id="load-profile-description" class="helper-text">
-            Low steady traffic to validate the endpoint works under light concurrent usage.
-          </p>
-          <p id="load-profile-summary" class="editor-empty"></p>
+
+          <div class="grid two-col form-grid">
+            <label>
+              Auth type
+              <select id="auth-type">
+                <option value="none">No auth</option>
+                <option value="basic">Basic (username/password)</option>
+                <option value="api_key">API key</option>
+                <option value="token">Custom token header</option>
+                <option value="bearer">Bearer token</option>
+                <option value="oauth_existing">OAuth (existing token)</option>
+                <option value="oauth_client_credentials">OAuth (client credentials)</option>
+                <option value="oauth_password">OAuth (password grant)</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="auth-fields" class="grid two-col"></div>
         </section>
 
-        <div id="custom-load-fields" class="grid three-col hidden">
-          <label>
-            Target type
-            <select id="target-type">
-              <option value="vus">VUs</option>
-              <option value="rpm">RPM</option>
-            </select>
-          </label>
-          <label>
-            Target value
-            <input id="target-value" type="number" value="10" min="1" />
-          </label>
-          <label>
-            Duration seconds
-            <input id="custom-duration" type="number" value="300" min="30" />
-          </label>
-          <label>
-            Ramp-up seconds
-            <input id="custom-ramp" type="number" value="60" min="10" />
-          </label>
-        </div>
-        <p id="custom-load-help" class="helper-text hidden">
-          Custom profile will ramp up to your target and hold it for the remaining duration.
-        </p>
-      </section>
+        <section id="step-request" class="panel reveal">
+          <div class="panel-intro">
+            <div class="section-title-block">
+              <p class="section-kicker">Step 3</p>
+              <h2>Request Data</h2>
+            </div>
+            <p class="section-note">
+              Add only the headers, params, and payload values required for this
+              request.
+            </p>
+          </div>
 
-      <section class="panel reveal">
-        <div class="section-head">
-          <h2>6. Generate</h2>
-          <button id="generate" class="btn primary" type="button">Generate k6 files</button>
-        </div>
-        <p class="helper-text" id="status-message">Ready.</p>
-      </section>
+          <div class="grid two-col form-grid">
+            <label>
+              Payload type
+              <select id="payload-type">
+                <option value="none">none</option>
+                <option value="json">json</option>
+                <option value="text">text</option>
+              </select>
+            </label>
+            <label>
+              Dynamic data
+              <select id="dynamic-mode">
+                <option value="static">Keep values static</option>
+                <option value="auto">Auto-generate dynamic values</option>
+              </select>
+            </label>
+          </div>
 
-      <section class="panel reveal">
-        <h2>Output</h2>
-        <div id="output-files" class="output-grid">
-          <p class="muted">Generated files will appear here.</p>
-        </div>
-      </section>
+          <div id="payload-json-mode-wrap" class="grid two-col hidden">
+            <label>
+              JSON input mode
+              <select id="payload-json-mode">
+                <option value="fields">Field builder</option>
+                <option value="raw">Paste raw JSON</option>
+              </select>
+            </label>
+            <p class="helper-text inline-note" id="payload-json-mode-help">
+              Use the builder for flat JSON. Switch to raw JSON for nested
+              objects or arrays.
+            </p>
+          </div>
+
+          <div class="grid two-col editors-grid">
+            <section class="editor-card">
+              <div class="editor-head">
+                <h3>Headers</h3>
+                <button id="add-header" class="btn secondary mini" type="button">Add header</button>
+              </div>
+              <p class="editor-empty">
+                Add only custom headers here. Auth headers come from the auth
+                section.
+              </p>
+              <div id="header-rows" class="kv-list"></div>
+            </section>
+
+            <section class="editor-card">
+              <div class="editor-head">
+                <h3>Query params</h3>
+                <button id="add-query-param" class="btn secondary mini" type="button">Add param</button>
+              </div>
+              <p class="editor-empty">Use query params for `?name=value` style inputs.</p>
+              <div id="query-rows" class="kv-list"></div>
+            </section>
+          </div>
+
+          <section id="payload-json-wrap" class="editor-card">
+            <div id="payload-json-builder" class="payload-mode">
+              <div class="editor-head">
+                <h3>JSON payload fields</h3>
+                <button id="add-payload-field" class="btn secondary mini" type="button">Add field</button>
+              </div>
+              <p class="editor-empty">Fast builder for flat JSON payloads.</p>
+              <div id="payload-rows" class="payload-list"></div>
+            </div>
+
+            <div id="payload-json-raw" class="payload-mode hidden">
+              <h3>Raw JSON payload</h3>
+              <p class="editor-empty">Paste raw JSON when you need nested objects or arrays.</p>
+              <textarea id="payload-json-raw-text" rows="8" placeholder='{"user":{"id":1},"items":[{"sku":"A1"}]}'></textarea>
+            </div>
+          </section>
+
+          <label id="payload-text-wrap" class="hidden">
+            Payload text
+            <textarea id="payload-text" rows="6" placeholder="Paste raw text payload"></textarea>
+          </label>
+        </section>
+
+        <section id="step-checks" class="panel reveal">
+          <div class="panel-intro">
+            <div class="section-title-block">
+              <p class="section-kicker">Step 4</p>
+              <h2>Checks + Thresholds</h2>
+            </div>
+            <p class="section-note">
+              Keep checks practical. The first version should validate response
+              health, not model every edge case.
+            </p>
+          </div>
+
+          <div class="grid two-col form-grid">
+            <label>
+              Expected status code
+              <input id="status-code" type="number" value="200" />
+            </label>
+          </div>
+
+          <div class="check-list">
+            <label class="check-row">
+              <span><input id="enable-body-contains" type="checkbox" /> Response should contain text</span>
+              <input id="body-contains-value" type="text" placeholder="success" disabled />
+            </label>
+
+            <label class="check-row">
+              <span><input id="enable-p95" type="checkbox" checked /> p95 response time (ms)</span>
+              <input id="p95-ms" type="number" value="800" min="1" />
+            </label>
+
+            <label class="check-row">
+              <span><input id="enable-p99" type="checkbox" checked /> p99 response time (ms)</span>
+              <input id="p99-ms" type="number" value="1500" min="1" />
+            </label>
+
+            <label class="check-row">
+              <span><input id="enable-error-rate" type="checkbox" checked /> Error rate threshold (%)</span>
+              <input id="error-rate-percent" type="number" value="1" min="0" max="100" step="0.1" />
+            </label>
+          </div>
+        </section>
+
+        <section id="step-load" class="panel reveal">
+          <div class="panel-intro">
+            <div class="section-title-block">
+              <p class="section-kicker">Step 5</p>
+              <h2>Load Profile</h2>
+            </div>
+            <p class="section-note">
+              Choose a preset when you need speed. Use custom only when you know
+              the exact target.
+            </p>
+          </div>
+
+          <div class="grid two-col form-grid">
+            <label>
+              Preset
+              <select id="load-preset">
+                <option value="quick">Quick</option>
+                <option value="smoke">Smoke</option>
+                <option value="load">Load</option>
+                <option value="stress">Stress</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+          </div>
+
+          <section class="editor-card profile-card">
+            <div class="editor-head">
+              <h3 id="load-profile-title">Smoke</h3>
+            </div>
+            <p id="load-profile-description" class="helper-text">
+              Low steady traffic to validate the endpoint works under light
+              concurrent usage.
+            </p>
+            <p id="load-profile-summary" class="profile-summary"></p>
+          </section>
+
+          <div id="custom-load-fields" class="grid three-col hidden">
+            <label>
+              Target type
+              <select id="target-type">
+                <option value="vus">VUs</option>
+                <option value="rpm">RPM</option>
+              </select>
+            </label>
+            <label>
+              Target value
+              <input id="target-value" type="number" value="10" min="1" />
+            </label>
+            <label>
+              Duration seconds
+              <input id="custom-duration" type="number" value="300" min="30" />
+            </label>
+            <label>
+              Ramp-up seconds
+              <input id="custom-ramp" type="number" value="60" min="10" />
+            </label>
+          </div>
+          <p id="custom-load-help" class="helper-text hidden">
+            Custom profile ramps to your target and then holds the load for the
+            remaining duration.
+          </p>
+        </section>
+
+        <section id="step-output" class="panel reveal output-panel">
+          <div class="panel-intro">
+            <div class="section-title-block">
+              <p class="section-kicker">Step 6</p>
+              <h2>Output</h2>
+            </div>
+            <p class="section-note">
+              Generated files stay local in the browser. Copy or download what
+              you need.
+            </p>
+          </div>
+
+          <div id="output-files" class="output-grid">
+            <p class="muted">Generated files will appear here.</p>
+          </div>
+        </section>
+      </div>
     </main>
 
     <script type="module" src="./app.js"></script>

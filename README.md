@@ -19,12 +19,10 @@ CLI + static web generator for modular k6 scripts.
 8. OAuth password grant (username/password optional)
 - Supports dynamic generation in 1 click (`static` or `auto`).
 - Keeps checks and thresholds simple in UI (checkbox + number inputs).
-- Generates modular files:
-1. `script.js`
-2. `config.js`
-3. `auth.js`
-4. `data-helper.js`
-5. `README.md`
+- Generates lean modular files:
+1. Always: `script.js`, `config.js`, `README.md`
+2. Only when needed: `auth.js` for OAuth token generation
+3. Only when needed: `data-helper.js` for dynamic fields
 
 ## Architecture
 

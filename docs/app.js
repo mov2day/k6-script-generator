@@ -41,6 +41,9 @@ const AUTH_LABELS = {
   oauth_password: "OAuth password grant"
 };
 
+const AUTH_CAUTION_TEXT =
+  "Use placeholders for auth values, for example {{TOKEN}} or {{CLIENT_SECRET}}. After generating the script, replace them with environment variables before running the test.";
+
 function byId(id) {
   const element = document.getElementById(id);
   if (!element) {
@@ -74,8 +77,8 @@ function setStatus(message, type = "muted") {
 function authFieldTemplate(authType) {
   if (authType === "basic") {
     return `
-      <label>Username <input name="username" type="text" autocomplete="username" /></label>
-      <label>Password <input name="password" type="password" autocomplete="current-password" /></label>
+      <label>Username <input name="username" type="text" autocomplete="username" placeholder="{{USERNAME}}" /></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" placeholder="{{PASSWORD}}" /></label>
     `;
   }
 
@@ -87,42 +90,42 @@ function authFieldTemplate(authType) {
           <option value="query">Query param</option>
         </select>
       </label>
-      <label>Key name <input name="keyName" type="text" value="x-api-key" /></label>
-      <label>Value <input name="value" type="text" /></label>
+      <label>Key name <input name="keyName" type="text" value="x-api-key" placeholder="x-api-key" /></label>
+      <label>Value <input name="value" type="text" placeholder="{{API_KEY}}" /></label>
     `;
   }
 
   if (authType === "token") {
     return `
-      <label>Header name <input name="headerName" type="text" value="X-Auth-Token" /></label>
-      <label>Token <input name="token" type="text" /></label>
+      <label>Header name <input name="headerName" type="text" value="X-Auth-Token" placeholder="X-Auth-Token" /></label>
+      <label>Token <input name="token" type="text" placeholder="{{TOKEN}}" /></label>
     `;
   }
 
   if (authType === "bearer") {
-    return `<label>Bearer token <input name="token" type="text" /></label>`;
+    return `<label>Bearer token <input name="token" type="text" placeholder="{{TOKEN}}" /></label>`;
   }
 
   if (authType === "oauth_existing") {
-    return `<label>Existing token <input name="existingToken" type="text" /></label>`;
+    return `<label>Existing token <input name="existingToken" type="text" placeholder="{{ACCESS_TOKEN}}" /></label>`;
   }
 
   if (authType === "oauth_client_credentials") {
     return `
-      <label>Token URL <input name="tokenUrl" type="url" /></label>
-      <label>Client ID <input name="clientId" type="text" /></label>
-      <label>Client secret <input name="clientSecret" type="password" /></label>
+      <label>Token URL <input name="tokenUrl" type="url" placeholder="https://auth.example.com/oauth/token" /></label>
+      <label>Client ID <input name="clientId" type="text" placeholder="{{CLIENT_ID}}" /></label>
+      <label>Client secret <input name="clientSecret" type="password" placeholder="{{CLIENT_SECRET}}" /></label>
       <label>Scope <input name="scope" type="text" placeholder="optional" /></label>
     `;
   }
 
   if (authType === "oauth_password") {
     return `
-      <label>Token URL <input name="tokenUrl" type="url" /></label>
-      <label>Client ID <input name="clientId" type="text" /></label>
-      <label>Client secret <input name="clientSecret" type="password" /></label>
-      <label>Username <input name="username" type="text" placeholder="optional" /></label>
-      <label>Password <input name="password" type="password" placeholder="optional" /></label>
+      <label>Token URL <input name="tokenUrl" type="url" placeholder="https://auth.example.com/oauth/token" /></label>
+      <label>Client ID <input name="clientId" type="text" placeholder="{{CLIENT_ID}}" /></label>
+      <label>Client secret <input name="clientSecret" type="password" placeholder="{{CLIENT_SECRET}}" /></label>
+      <label>Username <input name="username" type="text" placeholder="{{USERNAME}} or optional" /></label>
+      <label>Password <input name="password" type="password" placeholder="{{PASSWORD}} or optional" /></label>
       <label>Scope <input name="scope" type="text" placeholder="optional" /></label>
     `;
   }
@@ -133,6 +136,8 @@ function authFieldTemplate(authType) {
 function renderAuthFields() {
   const authType = byId("auth-type").value;
   byId("auth-fields").innerHTML = authFieldTemplate(authType);
+  byId("auth-caution").textContent = authType === "none" ? "" : AUTH_CAUTION_TEXT;
+  byId("auth-caution").classList.toggle("hidden", authType === "none");
 }
 
 function togglePairedInput(checkboxId, inputId) {

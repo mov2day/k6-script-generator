@@ -469,11 +469,23 @@ function generateOAuthHelperFile() {
   ].join("\n");
 }
 
+function collectValidRegexPatterns(assertions = {}) {
+  return (assertions.bodyRegex || []).filter((pattern) => {
+    try {
+      new RegExp(pattern);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
 function generateScriptFile(config) {
   const dynamic = hasDynamicRules(config);
   const oauthHelper = needsOAuthHelper(config);
   const encodingImport = needsEncodingImport(config);
   const authType = config.auth.type;
+  const validRegexPatterns = collectValidRegexPatterns(config.assertions);
   const lines = [];
 
   lines.push("import http from \"k6/http\";");
@@ -491,123 +503,91 @@ function generateScriptFile(config) {
   lines.push("");
   lines.push("export const options = config.options;");
   lines.push("");
-  lines.push("function buildUrl(baseUrl, path, queryParams) {");
-  lines.push("  var base = String(baseUrl || \"\").replace(/\\/+$/, \"\");");
-  lines.push("  var normalizedPath = String(path || \"/\");");
-  lines.push("  var finalPath = normalizedPath.charAt(0) === \"/\" ? normalizedPath : \"/\" + normalizedPath;");
-  lines.push("  var parts = [];");
-  lines.push("");
-  lines.push("  Object.entries(queryParams || {}).forEach(function (entry) {");
-  lines.push("    var key = entry[0];");
-  lines.push("    var value = entry[1];");
-  lines.push("    if (value === undefined || value === null || value === \"\") {");
-  lines.push("      return;");
-  lines.push("    }");
-  lines.push("    parts.push(encodeURIComponent(key) + \"=\" + encodeURIComponent(String(value)));");
-  lines.push("  });");
-  lines.push("");
-  lines.push("  return parts.length ? base + finalPath + \"?\" + parts.join(\"&\") : base + finalPath;");
-  lines.push("}");
-  lines.push("");
-  if (authType !== "none") {
-    lines.push(`function applyAuth(headers, queryParams${oauthHelper ? ", authState" : ""}) {`);
-    if (authType === "basic") {
-      lines.push("  headers.Authorization = \"Basic \" + encoding.b64encode((config.auth.username || \"\") + \":\" + (config.auth.password || \"\"));");
-    } else if (authType === "bearer") {
-      lines.push("  headers.Authorization = \"Bearer \" + (config.auth.token || \"\");");
-    } else if (authType === "token") {
-      lines.push("  headers[config.auth.headerName || \"X-Auth-Token\"] = config.auth.token || \"\";");
-    } else if (authType === "api_key") {
-      lines.push("  if (config.auth.location === \"query\") {");
-      lines.push("    queryParams[config.auth.keyName || \"api_key\"] = config.auth.value || \"\";");
-      lines.push("  } else {");
-      lines.push("    headers[config.auth.keyName || \"x-api-key\"] = config.auth.value || \"\";");
-      lines.push("  }");
-    } else if (authType === "oauth_existing") {
-      lines.push("  headers.Authorization = \"Bearer \" + (config.auth.existingToken || \"\");");
-    } else if (oauthHelper) {
-      lines.push("  headers.Authorization = \"Bearer \" + ((authState && authState.accessToken) || \"\");");
-    }
-    lines.push("");
-    lines.push("  return { headers: headers, queryParams: queryParams };");
-    lines.push("}");
+
+  validRegexPatterns.forEach((pattern, index) => {
+    lines.push(`const bodyRegex${index} = new RegExp(${JSON.stringify(pattern)});`);
+  });
+  if (validRegexPatterns.length) {
     lines.push("");
   }
-  lines.push("function buildChecks(assertions) {");
-  lines.push("  var checks = {};");
-  lines.push("  checks[\"status is \" + assertions.statusCode] = function (response) {");
-  lines.push("    return response.status === assertions.statusCode;");
-  lines.push("  };");
-  lines.push("");
-  lines.push("  (assertions.bodyContains || []).forEach(function (expected) {");
-  lines.push("    checks['body contains \"' + expected + '\"'] = function (response) {");
-  lines.push("      return typeof response.body === \"string\" && response.body.indexOf(expected) !== -1;");
-  lines.push("    };");
-  lines.push("  });");
-  lines.push("");
-  lines.push("  (assertions.bodyRegex || []).forEach(function (pattern) {");
-  lines.push("    var regex = null;");
-  lines.push("    try {");
-  lines.push("      regex = new RegExp(pattern);");
-  lines.push("    } catch (error) {");
-  lines.push("      regex = null;");
-  lines.push("    }");
-  lines.push("    if (!regex) {");
-  lines.push("      return;");
-  lines.push("    }");
-  lines.push("    checks[\"body matches /\" + pattern + \"/\"] = function (response) {");
-  lines.push("      return typeof response.body === \"string\" && regex.test(response.body);");
-  lines.push("    };");
-  lines.push("  });");
-  lines.push("");
-  lines.push("  return checks;");
-  lines.push("}");
+
+  lines.push("const responseChecks = {");
+  lines.push(`  ${JSON.stringify(`status is ${config.assertions.statusCode}`)}: (response) => response.status === ${config.assertions.statusCode},`);
+  (config.assertions.bodyContains || []).forEach((expected) => {
+    lines.push(
+      `  ${JSON.stringify(`body contains \"${expected}\"`)}: (response) => typeof response.body === \"string\" && response.body.includes(${JSON.stringify(expected)}),`
+    );
+  });
+  validRegexPatterns.forEach((pattern, index) => {
+    lines.push(
+      `  ${JSON.stringify(`body matches /${pattern}/`)}: (response) => typeof response.body === \"string\" && bodyRegex${index}.test(response.body),`
+    );
+  });
+  lines.push("};");
   lines.push("");
 
   if (oauthHelper) {
     lines.push("export function setup() {");
-    lines.push("  return { accessToken: getAccessToken(config.auth) };");
+    lines.push("  return getAccessToken(config.auth);");
     lines.push("}");
     lines.push("");
   }
 
-  lines.push(`export default function (${oauthHelper ? "setupData" : ""}) {`);
+  lines.push(`export default function${oauthHelper ? "(accessToken)" : "()"} {`);
   if (dynamic) {
-    lines.push("  var requestData = applyDynamicData(config.request);");
+    lines.push("  const request = { ...config.request, ...applyDynamicData(config.request) };");
   } else {
-    lines.push("  var requestData = {");
-    lines.push("    headers: Object.assign({}, config.request.headers || {}),");
-    lines.push("    queryParams: Object.assign({}, config.request.queryParams || {}),");
-    lines.push("    payload: config.request.payload");
-    lines.push("  };");
+    lines.push("  const request = config.request;");
   }
   lines.push("");
-  if (authType !== "none") {
-    lines.push("  var authApplied = applyAuth(");
-    lines.push("    Object.assign({}, requestData.headers || {}),");
-    lines.push(`    Object.assign({}, requestData.queryParams || {})${oauthHelper ? "," : ""}`);
-    if (oauthHelper) {
-      lines.push("    setupData");
-    }
-    lines.push("  );");
-  } else {
-    lines.push("  var authApplied = {");
-    lines.push("    headers: Object.assign({}, requestData.headers || {}),");
-    lines.push("    queryParams: Object.assign({}, requestData.queryParams || {})");
-    lines.push("  };");
-  }
+  lines.push("  const headers = { ...(request.headers || {}) };");
+  lines.push("  const queryParams = { ...(request.queryParams || {}) };");
   lines.push("");
-  lines.push("  var body = null;");
-  lines.push("  if (config.request.payloadType === \"json\") {");
-  lines.push("    authApplied.headers[\"Content-Type\"] = authApplied.headers[\"Content-Type\"] || \"application/json\";");
-  lines.push("    body = JSON.stringify(requestData.payload || {});");
-  lines.push("  } else if (config.request.payloadType === \"text\") {");
-  lines.push("    body = typeof requestData.payload === \"string\" ? requestData.payload : String(requestData.payload || \"\");");
+
+  if (authType === "basic") {
+    lines.push("  const credentials = `${config.auth.username || \"\"}:${config.auth.password || \"\"}`;");
+    lines.push("  headers.Authorization = `Basic ${encoding.b64encode(credentials)}`;");
+    lines.push("");
+  } else if (authType === "bearer") {
+    lines.push("  headers.Authorization = `Bearer ${config.auth.token || \"\"}`;");
+    lines.push("");
+  } else if (authType === "token") {
+    lines.push("  headers[config.auth.headerName || \"X-Auth-Token\"] = config.auth.token || \"\";");
+    lines.push("");
+  } else if (authType === "api_key") {
+    lines.push("  if (config.auth.location === \"query\") {");
+    lines.push("    queryParams[config.auth.keyName || \"api_key\"] = config.auth.value || \"\";");
+    lines.push("  } else {");
+    lines.push("    headers[config.auth.keyName || \"x-api-key\"] = config.auth.value || \"\";");
+    lines.push("  }");
+    lines.push("");
+  } else if (authType === "oauth_existing") {
+    lines.push("  headers.Authorization = `Bearer ${config.auth.existingToken || \"\"}`;");
+    lines.push("");
+  } else if (oauthHelper) {
+    lines.push("  headers.Authorization = `Bearer ${accessToken || \"\"}`;");
+    lines.push("");
+  }
+
+  lines.push("  let body = null;");
+  lines.push("  if (request.payloadType === \"json\") {");
+  lines.push("    headers[\"Content-Type\"] = headers[\"Content-Type\"] || \"application/json\";");
+  lines.push("    body = JSON.stringify(request.payload || {});");
+  lines.push("  } else if (request.payloadType === \"text\") {");
+  lines.push("    body = typeof request.payload === \"string\" ? request.payload : String(request.payload || \"\");");
   lines.push("  }");
   lines.push("");
-  lines.push("  var url = buildUrl(config.baseUrl, config.request.path, authApplied.queryParams);");
-  lines.push("  var response = http.request(config.request.method, url, body, { headers: authApplied.headers });");
-  lines.push("  check(response, buildChecks(config.assertions));");
+  lines.push("  const path = String(request.path || \"/\");");
+  lines.push("  const normalizedPath = path.startsWith(\"/\") ? path : `/${path}`;");
+  lines.push("  const queryString = Object.entries(queryParams)");
+  lines.push("    .filter(([, value]) => value !== undefined && value !== null && value !== \"\")");
+  lines.push("    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)");
+  lines.push("    .join(\"&\");");
+  lines.push("  const baseUrl = String(config.baseUrl || \"\").replace(/\\/+$/, \"\");");
+  lines.push("  const url = queryString ? `${baseUrl}${normalizedPath}?${queryString}` : `${baseUrl}${normalizedPath}`;");
+  lines.push("");
+  lines.push("  const response = http.request(request.method, url, body, { headers });");
+  lines.push("  check(response, responseChecks);");
   lines.push("}");
   lines.push("");
 

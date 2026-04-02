@@ -65,6 +65,22 @@ if (files["auth.js"]) {
   throw new Error("Did not expect auth.js for bearer-token auth.");
 }
 
+if (files["script.js"].includes("function buildUrl")) {
+  throw new Error("Did not expect buildUrl helper in generated script.");
+}
+
+if (files["script.js"].includes("function applyAuth")) {
+  throw new Error("Did not expect applyAuth helper in generated script.");
+}
+
+if (files["script.js"].includes("function buildChecks")) {
+  throw new Error("Did not expect buildChecks helper in generated script.");
+}
+
+if (!files["script.js"].includes("const responseChecks = {")) {
+  throw new Error("Expected inline responseChecks in generated script.");
+}
+
 const oauthFiles = generateProjectFiles({
   meta: {
     name: "oauth-smoke-test"
@@ -102,6 +118,10 @@ if (!oauthFiles["auth.js"]) {
 
 if (oauthFiles["data-helper.js"]) {
   throw new Error("Did not expect data-helper.js when no dynamic rules exist.");
+}
+
+if (!oauthFiles["script.js"].includes("return getAccessToken(config.auth);")) {
+  throw new Error("Expected simplified OAuth setup in generated script.");
 }
 
 console.log("Smoke check passed.");
